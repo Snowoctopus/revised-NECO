@@ -1165,8 +1165,8 @@ knh4_two = knh4_two &
             + (1D0-gam)*gbio3*zoo3_one &              ! Grazing excretation: (1-)gZ(P+BHet+BAOO+BNOO); gbio3=g*(bTot+pTot)
             - 1D0/ynh4_bnh4*u_bnh4*bnh4_one &         ! NH4 oxidizer consumption: 1/yNH4*uAOO*BAOO
             - u_p1*p1_one & 
-            - u_p2*p2_one*limnh4p2/(nlimtotp2+1D-38) &
-            - u_p3*p3_one*limnh4p3/(nlimtotp3+1D-38)  ! VNH4*P = up*P*rN = up*P*(NH4/(NH4+KNH4)/(NH4/(NH4+KNH4)+exp(a*NH4)*NO2/(NO2+KNO2)+exp(a*NH4)*NO3/(NO3+KNO3)))
+            - umaxp2_nh4*p2_one*limnh4p2 &
+            - umaxp3_nh4*p3_one*limnh4p3  ! VNH4*P = up*P*rN = up*P*(NH4/(NH4+KNH4)/(NH4/(NH4+KNH4)+exp(a*NH4)*NO2/(NO2+KNO2)+exp(a*NH4)*NO3/(NO3+KNO3)))
 
 !-------
 ! NO2
@@ -1174,16 +1174,16 @@ knh4_two = knh4_two &
 kno2_two = kno2_two &
             + eno2_bnh4*u_bnh4*bnh4_one &              ! source: NH4 oxidize, (1/yNH4-1)*uAOO*BAOO
             - 1D0/yno2_bno2*u_bno2*bno2_one &          ! sink: aerobic NO2 oxidizer, 1/yN2O*uNOO*BNOO
-            - u_p2*p2_one*limno2p2/(nlimtotp2+1D-38) & ! sink: p consumption VNO2*P = up*P*(exp(a*NH4)*NO2/(NO2+KNO2)/(NH4/(NH4+KNH4)+exp(a*NH4)*NO2/(NO2+KNO2)+exp(a*NH4)*NO3/(NO3+KNO3)))
-            - u_p3*p3_one*limno2p3/(nlimtotp3+1D-38) 
+            - umaxp2_nox*p2_one*limno2p2 & ! sink: p consumption VNO2*P = up*P*(exp(a*NH4)*NO2/(NO2+KNO2)/(NH4/(NH4+KNH4)+exp(a*NH4)*NO2/(NO2+KNO2)+exp(a*NH4)*NO3/(NO3+KNO3)))
+            - umaxp3_nox*p3_one*limno2p3 
             
 !-------
 ! NO3
 !-------
 kno3_two = kno3_two &
             + eno3_bno2*u_bno2*bno2_one & ! source: aerobic NO2 oxidizer, (1/yNO2-1)*uNOO*BNOO                     
-            - u_p2*p2_one*limno3p2/(nlimtotp2+1D-38) & ! no3uptakeP, VNO3P = up*P*(exp(a*NH4)*NO3/(NO3+KNO3)/(NH4/(NH4+KNH4)+exp(a*NH4)*NO2/(NO2+KNO2)+exp(a*NH4)*NO3/(NO3+KNO3)))
-            - u_p3*p3_one*limno3p3/(nlimtotp3+1D-38)
+            - umaxp2_nox*p2_one*limno3p2 & ! no3uptakeP, VNO3P = up*P*(exp(a*NH4)*NO3/(NO3+KNO3)/(NH4/(NH4+KNH4)+exp(a*NH4)*NO2/(NO2+KNO2)+exp(a*NH4)*NO3/(NO3+KNO3)))
+            - umaxp3_nox*p3_one*limno3p3
             
 !------
 ! O2
@@ -1270,12 +1270,12 @@ kno2_no2oxid=-1/yno2_bno2*u_bno2*bno2_one
 kno2_p3use=-u_p3*p3_one*limno2p3/(nlimtotp3+1D-38)
 kno2_p2use=-u_p2*p2_one*limno2p2/(nlimtotp2+1D-38)
 kno3_no2oxid=eno3_bno2*u_bno2*bno2_one
-P3uptakeNH4=-u_p3*p3_one*limnh4p3/(nlimtotp3+1D-38)
-P3uptakeNO2=-u_p3*p3_one*limno2p3/(nlimtotp3+1D-38)
-P3uptakeNO3=-u_p3*p3_one*limno3p3/(nlimtotp3+1D-38)
-P2uptakeNH4=-u_p2*p2_one*limnh4p2/(nlimtotp2+1D-38)
-P2uptakeNO2=-u_p2*p2_one*limno2p2/(nlimtotp2+1D-38)
-P2uptakeNO3=-u_p2*p2_one*limno3p2/(nlimtotp2+1D-38)
+P3uptakeNH4=-umaxp3_nh4*p3_one*limnh4p3
+P3uptakeNO2=-umaxp3_nox*p3_one*limno2p3
+P3uptakeNO3=-umaxp3_nox*p3_one*limno3p3
+P2uptakeNH4=-umaxp2_nh4*p2_one*limnh4p2
+P2uptakeNO2=-umaxp2_nox*p2_one*limno2p2
+P2uptakeNO3=-umaxp2_nox*p2_one*limno3p2
 P3growth=u_p3*p3_one
 P2growth=u_p2*p2_one
 !dom_lateral_flux = 0.5D0*(t_dom_relax(j)+t_dom_relax(j+1))*(domfarfield-dom_one)*inmask 
@@ -1957,4 +1957,5 @@ SUBROUTINE INITIAL_VARS()
     ALLOCATE(sumall(ind,17))
 END SUBROUTINE INITIAL_VARS
 END PROGRAM NECO
+
 
