@@ -1,7 +1,8 @@
 
 PROGRAM NECO
 ! revised record-Moge Du
-! 11/12/2025 change the parameterization of two phytoplankton group (Pro and Syn) refer to Masuda et al. 2023
+! 11/12/2025 change the parameterization of two phytoplankton group (Pro and Syn) reference: Masuda et al. 2023
+! 11/16/2025 add the lateral DON flux term. reference: Bianchi et al. 2023 NitrOMZv1.0
 
 IMPLICIT NONE
 
@@ -44,8 +45,8 @@ REAL*8,PARAMETER :: kappazmax = 1D-3 ![kZmax], m2/s !1D-2
 
 !================================
 ! P: phytoplankton
-!      p3: NOX preferred, large; 
-!      p2: NH4 preferred, small;
+!      p3: Pro-functional; 
+!      p2: Syn-functional;
 !================================
 
 !------------------------------
@@ -116,11 +117,11 @@ REAL*8,PARAMETER :: mz = 0.7D3  ! [mZ], 1/(mol/m3/d)), quadratic mortality for Z
 !==========================================================
 REAL*8,PARAMETER :: yd_bo_pa = 0.20D0                     !<-0.14D0(11/27)  !{0.14}, [yD], mol cells/mol Organic matter - aerobic bacteria yield
 REAL*8,PARAMETER :: ydon_bo = 0.20D0 
-REAL*8,PARAMETER :: pd_max = 1D0                       ![VmaxD], 1/day - normalized max detritus uptake to match nitrate max uptake,
+REAL*8,PARAMETER :: pd_max = 1D0                          ![VmaxD], 1/day - normalized max detritus uptake to match nitrate max uptake,
 REAL*8,PARAMETER :: pdon_max = 1D0                       
-REAL*8,PARAMETER :: kd = 0.05D-3                       ![KD], mol/m3, org matter uptake half sat; used to be 5
-REAL*8,PARAMETER :: kdon = 0.05D-3                       ![KD], mol/m3, org matter uptake half sat; used to be 5
-REAL*8,PARAMETER :: enh4_bo_pa = (1D0/yd_bo_pa-1D0)          ![1/yD -1], production of ammonia per mol cells produced
+REAL*8,PARAMETER :: kd = 0.05D-3                          ![KD], mol/m3, org matter uptake half sat; used to be 5
+REAL*8,PARAMETER :: kdon = 0.05D-3                        ![KD], mol/m3, org matter uptake half sat; used to be 5
+REAL*8,PARAMETER :: enh4_bo_pa = (1D0/yd_bo_pa-1D0)            ![1/yD -1], production of ammonia per mol cells produced
 REAL*8,PARAMETER :: enh4_bo = (1D0/ydon_bo-1D0)
 REAL*8,PARAMETER :: yo_bo_pa = yd_bo_pa/20D0*4D0/(1D0-yd_bo_pa) ![yO2,Het], mol cells/mol O2 -where cells have 1mol N, [yo2_B]
 REAL*8,PARAMETER :: yo_bo = ydon_bo/20D0*4D0/(1D0-ydon_bo) 
@@ -159,6 +160,17 @@ REAL*8,PARAMETER :: o2sat = 0.2121D0       ![O2,SAT] mol/m3 from calc_oxsat(25+2
 !deep oxygen relaxation
 REAL*8,PARAMETER :: o2satdeep = 0.2D0      ![O2,SAT_DEEP], mol/m3, avg (for ~7 C) and 35
 REAL*8,PARAMETER :: t_o2relax = 1D-2       !<-1D-2(11/27)  !{1D-2}[O2,LATRAL]1/day
+
+!==========================================================
+! DON lateral flux term:
+!==========================================================
+REAL*8,PARAMETER :: domfarfield = 2D-3      !mol/m3 farfield dom concentration supporting the advection; average DON concentration at HOT 4e-3 mol/m3 
+REAL*8,PARAMETER :: t_dom_relax = 8.64e-4   !use this if set the equal lateral flux in the water column [DOM,LATRAL]1/day calculated based on the minimum of an advective timescale 10^8s ref: residence time of water within subtrophic ocean
+!use following set if Ekman lateral flux 
+!REAL*8,PARAMETER :: t_dom_relax_surface = 8.64D-4 
+!REAL*8,PARAMETER :: ekman_depth = 150D0 
+!REAL*8,PARAMETER :: t_dom_relax_deep = 8.64D-5 
+!REAL*8,DIMENSION(nz+1) :: t_dom_relax 
 
 !------------------
 ! sinking velocity
@@ -253,6 +265,7 @@ REAL*8,DIMENSION(nz+4) :: pnh4,pno2,pno3,po
 ! Organic N
 !-----------
 REAL*8,DIMENSION(nz+4) :: d,dom
+!REAL*8,DIMENSION(nz+4) :: dom_initial !for the fixed don profile
 REAL*8,DIMENSION(nz+4) :: kdA,kdB,kdC,kdD,dA,dB,dC
 REAL*8,DIMENSION(nz+4) :: kdomA,kdomB,kdomC,kdomD,domA,domB,domC
 REAL*8,DIMENSION(nz+4) :: pd,pdon,porg
@@ -278,6 +291,7 @@ REAL*8,DIMENSION(nz+4) :: kno2_nh4oxid,kno2_no2oxid,kno2_p3use,kno2_p2use
 REAL*8,DIMENSION(nz+4) :: kno3_no2oxid,P3uptakeNO3,P2uptakeNO3, P3uptakeNO2,P2uptakeNO2
 REAL*8,DIMENSION(nz+4) :: p3growth,p2growth,p3mortality,p2mortality,p3grazed,p2grazed
 REAL*8,DIMENSION(nz+4) :: nh4tt_1, nh4tt_2, no2tt_1, no2tt_2, no3tt_1, no3tt_2
+REAL*8,DIMENSION(nz+4) :: dom_lateral_flux 
 
 !================
 ! run preparing
@@ -424,6 +438,25 @@ KzO(nz+1) = 0D0
 Kz(1) = 0D0
 Kz(nz+1) = 0D0
 !Kz=coeffKz*Kz
+
+!-----------------------------------------------------------------------------------------------
+! DOM lateral transport profile with Ekman-like decay
+!-----------------------------------------------------------------------------------------------
+! initializa t_dom_relax
+!DO j=1,nz+1
+!    IF (j == 1) THEN
+!        ! surface
+!        t_dom_relax(j) = t_dom_relax_surface
+!    ELSE IF (j == nz+1) THEN
+!        ! bottom
+!        t_dom_relax(j) = t_dom_relax_deep
+!    ELSE
+!        ! expotential decay to simulate the advect Ekman transport 
+!        t_dom_relax(j) = t_dom_relax_deep + (t_dom_relax_surface - t_dom_relax_deep) * &
+!                         EXP(-z(j)/ekman_depth)
+!    END IF
+!END DO
+!print*, t_dom_relax
 
 !-----------------------------------------------------------------------
 ! 4. gas transfer coefficient for each of the n boxes comprising the ml
@@ -592,6 +625,7 @@ DO t = 1,nt
     bno2 = bno2 + dt/6D0*(kbno2A + 2D0*kbno2B + 2D0*kbno2C + kbno2D);
     d = d + dt/6D0*(kdA + 2D0*kdB + 2D0*kdC + kdD);
     dom = dom + dt/6D0*(kdomA + 2D0*kdomB + 2D0*kdomC + kdomD);
+    !dom = dom_initial ; ! for the fixed dom profile
     o = o + dt/6D0*(koA + 2D0*koB + 2D0*koC + koD);
     zoo = zoo + dt/6D0*(kzooA + 2D0*kzooB + 2D0*kzooC + kzooD);
     zoo2 = zoo2 + dt/6D0*(kzoo2A + 2D0*kzoo2B + 2D0*kzoo2C + kzoo2D);
@@ -1051,9 +1085,9 @@ po=po_coef*o_one*TempFun
     
 ! (b) uPON = VmaxD*PON*rT/(PON+KD)
 pdon=pd_max*(dom_one/(dom_one+kdon))*TempFun   ! DOM-consuming Het: pdon=pd_max*(don_one/(don_one+kd))*TempFun 
-pd=pd_max*(d_one/(d_one+kd))*TempFun         ! POM-consuming Het
+pd=pd_max*(d_one/(d_one+kd))*TempFun           ! POM-consuming Het
 
-! (c) uHet = yD*uPON = yD*VmaxD*D*rT/(D+KD)  !--> uHet = min(uHet, uO2)
+! (c) uHet = yD*uPON = yD*VmaxD*D*rT/(D+KD)    !--> uHet = min(uHet, uO2)
 u_bo=min(po*yo_bo,pdon*ydon_bo)                ! u_bo=min(po*yo_bo,pd*yd_bo)
 u_bo_pa=min(po*yo_bo_pa,pd*yd_bo_pa)
 
@@ -1213,7 +1247,9 @@ kdom_two = kdom_two &
          + (1-fp)*p3_one*u_p3 &  ! phytoplankton exduation 
          + (1-fp)*p2_one*u_p2 &
          + (1-fp)*p1_one*u_p1 &
-         - 1D0/ydon_bo*u_bo*bo_one ! sink: 1 heterotroph --> 1/yD*uhet*Bhet
+         - 1D0/ydon_bo*u_bo*bo_one & ! sink: 1 heterotroph --> 1/yD*uhet*Bhet
+         + t_dom_relax*(domfarfield-dom_one)*inmask ! use this for the equal lateral flux in water column
+         !+ 0.5D0*(t_dom_relax(j)+t_dom_relax(j+1))*(domfarfield-dom_one)*inmask ! use this for the Ekman lateral flux in water column (remember to add the & at the end of last line)
 
 !=============
 ! for output
@@ -1242,6 +1278,8 @@ P2uptakeNO2=-u_p2*p2_one*limno2p2/(nlimtotp2+1D-38)
 P2uptakeNO3=-u_p2*p2_one*limno3p2/(nlimtotp2+1D-38)
 P3growth=u_p3*p3_one
 P2growth=u_p2*p2_one
+!dom_lateral_flux = 0.5D0*(t_dom_relax(j)+t_dom_relax(j+1))*(domfarfield-dom_one)*inmask 
+dom_lateral_flux = t_dom_relax*(domfarfield-dom_one)*inmask !record the lateral dom flux
 !nh4tt_1=nh4_one/(enh4_bo*u_bo*bo_one+ (1D0-gam)*gbio3*zoo3_one)
 !nh4tt_2=nh4_one/(P3uptakeNH4+P2uptakeNH4+knh4_nh4oxid) 
 !no2tt_1=no2_one/kno2_nh4oxid
@@ -1557,6 +1595,9 @@ SUBROUTINE SAVE_LAST_DATA()
     CLOSE(5)
     OPEN(UNIT=5,FILE='dom_f.txt',ACCESS='SEQUENTIAL',BLANK='ZERO')
     WRITE(5,*) (dom(J),J=1,nz+4)
+    CLOSE(5)
+    OPEN(UNIT=5,FILE='dom_lateral_flux.txt',ACCESS='SEQUENTIAL',BLANK='ZERO')
+    WRITE(5,*) (dom_lateral_flux(J),J=1,nz+4)
     CLOSE(5)
     OPEN(UNIT=5,FILE='o_f.txt',ACCESS='SEQUENTIAL',BLANK='ZERO')
     WRITE(5,*) (o(J),J=1,nz+4)
@@ -1916,3 +1957,4 @@ SUBROUTINE INITIAL_VARS()
     ALLOCATE(sumall(ind,17))
 END SUBROUTINE INITIAL_VARS
 END PROGRAM NECO
+
